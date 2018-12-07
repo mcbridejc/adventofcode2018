@@ -13,7 +13,7 @@ import (
 
 
 const GridSize = 3
-const MaxCountLevel = 5000
+const MaxCountLevel = 500
 const RequiredConsecutiveZeroCountLayers = 10
 
 func GetInput(filepath string) (points [][2]int) {
@@ -119,6 +119,26 @@ func JarvisConvexHull(points [][2]int) [][2]int {
 	return hull
 }
 
+// Get a list of points making up a square with a distance of halfwidth
+// from center to edge
+func SquareBorder(halfwidth int, cx int, cy int) [][2]int {
+	if halfwidth == 0 {
+		return [][2]int{{cx, cy}}
+	}
+	// Pre-allocate the needed size just for efficiency
+	totalPoints := (2 * halfwidth + 1) * 4 - 4
+	points := make([][2]int, totalPoints)
+	for x := -1 * halfwidth; x <= halfwidth; x += 1 {
+		points = append(points, [2]int{cx + x, cy - halfwidth})
+		points = append(points, [2]int{cx + x, cy + halfwidth})
+	}
+	for y := -1 * halfwidth + 1; y <= halfwidth-1; y += 1 {
+		points = append(points, [2]int{cx + halfwidth, cy + y})
+		points = append(points, [2]int{cx - halfwidth, cy + y})
+	}
+	return points
+}
+
 func min(list []int) int {
 	min := math.MaxInt32
 	for _, a := range(list) {
@@ -145,6 +165,47 @@ func ContainsPoint(list [][2]int, p [2]int) bool {
 		}
 	}
 	return false
+}
+
+func IntAbs(x int) int {
+	if x < 0 {
+		return -x
+	} else {
+		return x
+	}
+}
+
+func IntMax(a int, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func FindOwningPointIndex(points [][2]int, x int, y int) int {
+	var closestPointIdx int
+	closestDistance := math.MaxInt32
+	var uniqueDistance bool
+	for i, p := range points {
+		dx := IntAbs((p[0] - x))
+		dy := IntAbs((p[1] - y))
+		d := dx + dy // Manhattan distance
+		//d := dx*dx + dy*dy // squared distance is fine for comparison
+		if d < closestDistance {
+			closestDistance = d
+			closestPointIdx = i
+			uniqueDistance = true
+		} else if d == closestDistance {
+			uniqueDistance = false
+		}
+	}
+
+	if uniqueDistance {
+		return closestPointIdx
+	} else {
+		return -1
+	}
 }
 
 func main() {
@@ -182,87 +243,45 @@ func main() {
 		MarkNode(gridImage, p[0], p[1],  color.RGBA{0, 255, 0, 255})
 	}
 	
-	/* Find convex hull. The points that make up the convex hull will be the "outside"
-	points. All of these points will have an infinite number of points that are closest
-	to them, and so are excluded from the solution.
-	*/
-	hull := JarvisConvexHull(points)
-	for _, p := range hull {
-		MarkNode(gridImage, p[0], p[1],  color.RGBA{0, 0, 0, 255})
-	}
-
-	/* Now count up cells by checking which points they are closest too. 
-	There's a question of what range of cells we need to check. Although
-	the number of cells is guaranteed to be bounded, cells that fall *outside* 
-	of the convex hull can still be closest to points that are *inside* of it,
-	which means we have to count somewhat outside of the range of the points. 
-	
-	The question is how far to count? I believe, in theory, in the limit as the
-	distance from a point inside the hull to the edge of the hull goes to 
-	zero, the distance to the furthest point that is closest to it goes to
-	infinity. So this isn't really bounded (except I suppose by the fact that
-	the points are integers and this quantizes the possible distances from hull)
-
-	I'm taking the approach of breaking of counting steadily outward like onion 
-	layers until no more points are counted. 
-	*/
-
-	cellCount := make([]int, len(points))
-	cellLists := make([][][2]int, len(points))
-	layer := 0
+	/* Take a square three times the size of a bounding square on the points, and 
+	match its border pixels to their nearest point. These points own an infinite
+	number of cells */
 	cx := (xMax + xMin) / 2
 	cy := (yMax + yMin) / 2
-	zeroEventLayerCount := 0
-	for {
-		eventCount := 0
-		numCells := (2 * layer + 1) * 4 - 4
-		cells := make([][2]int, 0, numCells)
-		for x := -1 * layer; x <= layer; x += 1 {
-			cells = append(cells, [2]int{cx + x, cy - layer}) // top row
-			if layer > 0 {
-				cells = append(cells, [2]int{cx + x, cy + layer}) // top row
-			}
+	infinite_distance := 2 * IntMax(xMax - xMin, yMax - yMin)
+	infinite_points := make([]bool, len(points))
+
+	squarePoints := SquareBorder(infinite_distance, cx, cy)
+	for _, sp := range squarePoints {
+		owner_idx := FindOwningPointIndex(points, sp[0], sp[1])
+		if owner_idx >= 0 {
+			infinite_points[owner_idx] = true
 		}
-		if layer > 0 {
-			for y := -1*layer + 1; y <= layer-1; y += 1 {
-				cells = append(cells, [2]int{cx - layer, cy + y})
-				cells = append(cells, [2]int{cx + layer, cy + y})
-			}
+	}
+	
+	// Mark the infinite points black for reference
+	for idx, isInfinite := range infinite_points {
+		if isInfinite {
+			MarkNode(gridImage, points[idx][0], points[idx][1], color.RGBA{0, 0, 0, 255})
 		}
-		for _, cell := range cells {
-			x := cell[0]
-			y := cell[1]
-			var closestPointIdx int
-			closestDistance := 50000 // effectively infinity
-			for i, p := range points {
-				dx := (p[0] - x)
-				dy := (p[1] - y)
-				//d := dx + dy // Manhattan distance
-				d := dx*dx + dy*dy // squared distance is fine for comparison
-				if d < closestDistance {
-					closestDistance = d
-					closestPointIdx = i
-				}
-			}
-			fmt.Println("Closesst point ", points[closestPointIdx])
-			if ContainsPoint(hull, points[closestPointIdx]) {
+	}
+	
+	/* Now count of all the cells accoring to their owner, excluding owners with
+	infinite points */
+	cellCount := make([]int, len(points))
+	cellLists := make([][][2]int, len(points))
+	for x := -1 * infinite_distance; x <= infinite_distance; x += 1 {
+		for y := -1 * infinite_distance; y <= infinite_distance; y += 1 {
+			owner_idx := FindOwningPointIndex(points, cx + x, cy + y)
+			if owner_idx < 0 || infinite_points[owner_idx] {
 				continue
 			}
-			cellCount[closestPointIdx] += 1
-			cellLists[closestPointIdx] = append(cellLists[closestPointIdx], [2]int{x, y})
-			eventCount += 1
-			zeroEventLayerCount = 0
+			cellCount[owner_idx] += 1
+			cellLists[owner_idx] = append(cellLists[owner_idx], [2]int{cx + x, cy+y})
 		}
-		if eventCount == 0 {
-			zeroEventLayerCount += 1
-			if zeroEventLayerCount > RequiredConsecutiveZeroCountLayers || layer > MaxCountLevel {
-				break
-			}
-		}
-		layer += 1
-		fmt.Printf("Added %d points. Continuing to layer %d\n", eventCount, layer)
 	}
 
+	// Find the point with the most owned cells
 	maxIdx := 0
 	maxValue := 0
 	for i, v := range cellCount {
@@ -272,8 +291,10 @@ func main() {
 		}
 	}
 
+	// Mark selected point
 	MarkNode(gridImage, points[maxIdx][0], points[maxIdx][1],  color.RGBA{255, 0, 0, 255})
 
+	// Fill in cells belonging to the largest region
 	for _, p := range cellLists[maxIdx] {
 		if ContainsPoint(points, p) {
 			continue // Dont overwrite original point marking
@@ -281,13 +302,59 @@ func main() {
 		MarkNode(gridImage, p[0], p[1], color.RGBA{240, 178, 122, 180})
 	}
 
-
-	imageFile, err := os.Create("grid.png")
+	imageFile, err := os.Create("grid1.png")
 	if err != nil {
 		panic(err)
 	}
 	png.Encode(imageFile, gridImage)
 
-	
+	fmt.Printf("Part 1\n------\n")
 	fmt.Printf("Biggest region is point (%d, %d) with %d cells\n", points[maxIdx][0], points[maxIdx][1], cellCount[maxIdx])
+
+	// PART 2
+	fmt.Printf("Part 2\n------\n")
+
+	// count up in outward layers until we dont count anymore
+	layer := 0
+	part2Count := 0
+	part2CellList := make([][2]int, 0)
+	for {
+		eventCount := 0
+		countPoints := SquareBorder(layer, cx, cy)
+		for _, p0 := range countPoints {
+			dSum := 0
+			for _, p1 := range points {
+				dSum += IntAbs(p1[0] - p0[0]) + IntAbs(p1[1] - p0[1])
+			}
+			if dSum < 10000 {
+				part2Count += 1
+				part2CellList = append(part2CellList, p0)
+				eventCount += 1
+			}
+		}
+		if eventCount == 0 && layer > 2*IntMax(cx, cy) {
+			break
+		}
+		layer += 1
+	}
+	
+	grid2Image := CreateGridImage(xMax + 10, yMax + 10) 
+	for _, p := range points {
+		MarkNode(grid2Image, p[0], p[1],  color.RGBA{0, 255, 0, 255})
+	}
+	//Fill in cells belonging to the largest region
+	for _, p := range part2CellList {
+		if ContainsPoint(points, p) {
+			continue // Dont overwrite original point marking
+		}
+		MarkNode(grid2Image, p[0], p[1], color.RGBA{240, 178, 122, 180})
+	}
+
+	imageFile, err = os.Create("grid2.png")
+	if err != nil {
+		panic(err)
+	}
+	png.Encode(imageFile, grid2Image)
+
+	fmt.Printf("Found %d points\n", part2Count)
 }
