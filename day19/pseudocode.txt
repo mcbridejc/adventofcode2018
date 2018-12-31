@@ -1,0 +1,20 @@
+// Psuedo-code of reverse engineered assemly
+
+// r5 is the only input to the function
+// It is setup differently in what I dubbed the "init" routine,
+// depending on the initial value of r0
+function compute(r5) {
+    r1 = 1
+
+    while r1 <= r5 {
+        r2 = 1
+        while r2 <= r5 {
+            r3 = r1 * r2
+            if r3 == r5 {
+                r0 = r0 + r1
+            }
+            r2 += 1
+        }
+    }
+    return r0
+}
