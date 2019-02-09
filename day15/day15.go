@@ -343,13 +343,24 @@ func Expand(world *WorldMap, visited PointSet, borderCoords [][2]int) (newBorder
 	return newBorderCoords
 }
 
-func CheckForAnyInRange(world *WorldMap, coordMap map[Direction][][2]int, isElf bool) map[Direction]bool {
-	result := make(map[Direction]bool)
+// Return true if a comes before b reading order
+func ReadingCompare(a, b [2]int) bool {
+	if a[1] == b[1] {
+		return a[0] < b[0]
+	} else {
+		return a[1] < b[1]
+	}
+}
+
+func CheckForAnyInRange(world *WorldMap, coordMap map[Direction][][2]int, isElf bool) map[Direction][2]int {
+	result := make(map[Direction][2]int)
 	for dir, points := range coordMap {
 		for _, p := range points {
 			if world.InRange(p[0], p[1], isElf) {
-				result[dir] = true
-				break
+				curPoint, found := result[dir]
+				if !found || (found && ReadingCompare(p, curPoint)) {
+					result[dir] = [2]int{p[0], p[1]}		
+				}
 			}
 		}
 	}
@@ -360,9 +371,9 @@ func ChooseDirection(world *WorldMap, char *Character) Direction {
 	// The algorithm is essentially to move outward along all possible paths until
 	// an in-range cell is found, or all cells are exhausted. 
 	// The only thing we care about is the next move, so we only need to find which 
-	// of the neighbor squares leads to a shorted path
-	// A common set of already visited points is kept, because if we reach a cell A
-	// via the NORTH route first, then any path that passes through later from one of 
+	// of the neighbor squares leads to a shorter path
+	// A common set of already visited points is kept, because if we reach a cell 
+	// via some route, then any path that passes through later from one of 
 	// the other starting directions must result in a longer path to any location
 
 	// First off, check if we are already in range
@@ -371,8 +382,8 @@ func ChooseDirection(world *WorldMap, char *Character) Direction {
 		return None
 	}
 
-	// Initialize a list of border coordinates with the starting 
-	// coordinate for each direction from our current location that is empty
+	// Initialize a list of border coordinates
+	// Each neighbor that is empty created a border coordinate
 	coords, directions := world.EmptyNeighbors(x, y)
 	if len(coords) == 0 {
 		// No neighboring cells are free, so we can't move
@@ -386,7 +397,7 @@ func ChooseDirection(world *WorldMap, char *Character) Direction {
 	routeFoundMap := CheckForAnyInRange(world, borderCoordsMap, char.isElf)
 	visitedSet := make(PointSet)
 
-	for ; len(routeFoundMap) == 0; routeFoundMap = CheckForAnyInRange(world, borderCoordsMap, char.isElf) {
+	for ; len(routeFoundMap) == 0; {
 		for dir, borderCoords := range borderCoordsMap {
 			borderCoordsMap[dir] = Expand(world, visitedSet, borderCoords)
 		}
@@ -405,20 +416,24 @@ func ChooseDirection(world *WorldMap, char *Character) Direction {
 				visitedSet[p] = true
 			}
 		}
+		routeFoundMap = CheckForAnyInRange(world, borderCoordsMap, char.isElf)
 	}
 
 	// When we get here, we broke because at least one initial direction 
 	// was expanded into a "in-range" cell. If there are more than one, we 
 	// want to choose them based on priority: North > West > East > South
 	// Problem description calls this "Reading order"
-
+	bestPoint := [2]int{0, 0}
+	selectedDir := None
 	for _, dir := range []Direction{North, West, East, South} {
-		if _, present := routeFoundMap[dir]; present {
-			return dir
+		if point, present := routeFoundMap[dir]; present {
+			if selectedDir == None || ReadingCompare(point, bestPoint) {
+				selectedDir = dir
+				bestPoint = point
+			}
 		}
 	}
-	// Can't happen
-	panic("How'd we get here...no direction found?")
+	return selectedDir
 }
 
 func ReadWorld(filepath string) *WorldMap {
