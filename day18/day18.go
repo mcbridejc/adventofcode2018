@@ -202,6 +202,7 @@ func main() {
 	
 	// Try to find the value after a large number of generations, by assuming it will 
 	// generate a repeated pattern before then
+	m = ReadInput("day18_input.txt")
 	pastMaps := make([]Map, 0)
 	MaxHistory := 100
 
