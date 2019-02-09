@@ -198,7 +198,17 @@ func (world *WorldMap) MoveCharacter(char *Character, dir Direction) {
 	char.position = [2]int{x, y}
 }
 
-func (world *WorldMap) CheckForWinner() (score int, finished bool) {
+func (world *WorldMap) ElfCount() int {
+	elfCount := 0
+	for _, c := range world.characters {
+		if c.isElf {
+			elfCount++
+		}
+	}
+	return elfCount
+}
+
+func (world *WorldMap) CheckForWinner() (score int, finished bool, winnerIsElf bool) {
 	elfCount := 0
 	goblinCount := 0
 	for _, c := range world.characters {
@@ -222,8 +232,11 @@ func (world *WorldMap) CheckForWinner() (score int, finished bool) {
 			totalHP += c.hitpoints
 		}
 		score = completedTurnCount * totalHP
+		if goblinCount == 0 {
+			winnerIsElf = true
+		}
 	}
-	return score, finished
+	return score, finished, winnerIsElf
 }
 
 func (world *WorldMap) IsTurnComplete() bool {
@@ -263,7 +276,7 @@ func (world *WorldMap) GetNeighboringCell(x int, y int, dir Direction) *GridCell
 	return &world.grid[y][x]
 }
 
-func (world *WorldMap) MakeNextMove() {
+func (world *WorldMap) MakeNextMove(elfBonus int) {
 	// Character list should be sorted by position already
 	// Find the next character that hasn't been moved this turn
 	var char *Character
@@ -283,8 +296,6 @@ func (world *WorldMap) MakeNextMove() {
 		world.turnCount++
 		char = world.characters[0]
 	}
-
-	fmt.Println("Moving character at ", char.position)
 	
 	char.awaitingMove = false
 	chosenDir := ChooseDirection(world, char)
@@ -320,6 +331,9 @@ func (world *WorldMap) MakeNextMove() {
 	}
 	if finalTarget != nil {
 		finalTarget.hitpoints -= AttackDamage
+		if char.isElf {
+			finalTarget.hitpoints -= elfBonus
+		}
 		if finalTarget.hitpoints <= 0 {
 			world.KillCharacter(finalTarget)
 		}
@@ -407,7 +421,7 @@ func ChooseDirection(world *WorldMap, char *Character) Direction {
 			numBorderCells += len(v)
 		}
 		if numBorderCells == 0 {
-			fmt.Println("Ran out of cells and didn't find any attack positions")
+			//fmt.Println("Ran out of cells and didn't find any attack positions")
 			return None
 		}
 		// Mark as visited so we don't re-visit in any future expand round
@@ -462,7 +476,8 @@ func ReadWorld(filepath string) *WorldMap {
 func entry() {
 	inputFile := flag.String("file", "day15_input.txt", "The input file")
 	rate := flag.Float64("rate", 1.0, "The number of ticks per second playrate")
-	replay := flag.Bool("replay", true, "Run in replay mode: simulate everything, and allow stepping through history in GUI")
+	replay := flag.Bool("replay", false, "Run in replay mode: simulate everything, and allow stepping through history in GUI")
+	part2 := flag.Bool("part2", false, "Compute part 2")
 	flag.Parse()
 	
 	world := ReadWorld(*inputFile)
@@ -472,17 +487,17 @@ func entry() {
 		worldSeries := make([]*WorldMap, 0)
 		for {
 			// Make the first move (because the current turn is complete)
-			world.MakeNextMove()
+			world.MakeNextMove(0)
 			for !world.IsTurnComplete() {
-				world.MakeNextMove()
-				_, finished := world.CheckForWinner()
+				world.MakeNextMove(0)
+				_, finished, _ := world.CheckForWinner()
 				if finished {
 					break
 				}
 			}
 			fmt.Println("Completed turn")
 			worldSeries = append(worldSeries, world.Copy())
-			score, finished := world.CheckForWinner()
+			score, finished, _ := world.CheckForWinner()
 			if(finished) {
 				frame := 0
 				fmt.Printf("The war is over! The final score is %d\n", score)
@@ -511,8 +526,33 @@ func entry() {
 				return
 			}
 		}
-		
+	} else if *part2 {
+		fmt.Println("Solving part 2: elf bonus")
+		world = ReadWorld(*inputFile)
+		initialElfCount := world.ElfCount()
+		elfBonus := 2
+		var score int
+		for {
+			finished := false
+			elfBonus++
+			fmt.Println("Trying elf bonus ", elfBonus)
+			world = ReadWorld(*inputFile)
+				
+			for !finished{
+				world.MakeNextMove(elfBonus)
+				if world.ElfCount() < initialElfCount {
+					// an elf died. Abort early
+					break
+				}
+				score, finished, _ = world.CheckForWinner()
+			}
+			if finished {
+				break
+			}
+		}
+		fmt.Println("Required bonus is %d, score is %d\n", elfBonus, score)
 	} else {
+		return
 		tickPeriod := time.Duration(float64(time.Second) / *rate) 
 		nextUpdate := time.Now().Add(tickPeriod)
 		for !renderer.Closed() {
@@ -520,8 +560,8 @@ func entry() {
 				time.Sleep(nextUpdate.Sub(time.Now()))
 			}
 			nextUpdate = time.Now().Add(tickPeriod)
-			world.MakeNextMove()
-			score, finished := world.CheckForWinner()
+			world.MakeNextMove(0)
+			score, finished, _ := world.CheckForWinner()
 			if(finished) {
 				fmt.Printf("The war is over! The final score is %d\n", score)
 				for {
